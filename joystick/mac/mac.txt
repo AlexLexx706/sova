@@ -1,0 +1,2 @@
+remote mac: D4:D4:DA:E5:6D:A0
+sova mac: 08:D1:F9:99:3F:9C
