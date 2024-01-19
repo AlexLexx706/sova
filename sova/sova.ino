@@ -16,10 +16,6 @@ struct JoystickState {
     char j_b;
 } joystick_state;
 
-//static uint8_t broadcastAddress[] = {0xD4, 0xD4, 0xDA, 0xE5, 0x6D, 0xA0};
-
-// static esp_now_peer_info_t peerInfo;
-
 static DFRobotDFPlayerMini myDFPlayer;
 
 Servo right_hand_servo;
@@ -66,21 +62,21 @@ void setup() {
 
     Serial2.begin(9600);
     Serial.begin(115200);
-    // if (!myDFPlayer.begin(Serial2)) { // Serial2 to communicate with mp3.
-    //     Serial.println(F("Unable to begin:"));
-    //     Serial.println(F("1.Please recheck the connection!"));
-    //     Serial.println(F("2.Please insert the SD card!"));
-    //     while (true)
-    //         ;
-    //     delay(0); // Code to compatible with ESP8266 watch dog.
-    // }
-    // Serial.println(F("DFPlayer Mini online."));
+    if (!myDFPlayer.begin(Serial2)) { // Serial2 to communicate with mp3.
+        Serial.println(F("Unable to begin:"));
+        Serial.println(F("1.Please recheck the connection!"));
+        Serial.println(F("2.Please insert the SD card!"));
+        while (true)
+            ;
+        delay(0); // Code to compatible with ESP8266 watch dog.
+    }
+    Serial.println(F("DFPlayer Mini online."));
 
-    // myDFPlayer.setTimeOut(500); // Set serial communictaion time out 500ms
+    myDFPlayer.setTimeOut(500); // Set serial communictaion time out 500ms
 
-    // myDFPlayer.volume(2);
-    // myDFPlayer.stop();
-    // myDFPlayer.enableLoopAll();
+    myDFPlayer.volume(2);
+    myDFPlayer.stop();
+    myDFPlayer.enableLoopAll();
 
     // Set device as a Wi-Fi Station
     WiFi.mode(WIFI_STA);
@@ -90,17 +86,6 @@ void setup() {
         Serial.println("Error initializing ESP-NOW");
         return;
     }
-
-    // // Register peer
-    // memcpy(peerInfo.peer_addr, broadcastAddress, 6);
-    // peerInfo.channel = 0;
-    // peerInfo.encrypt = false;
-
-    // // Add peer
-    // if (esp_now_add_peer(&peerInfo) != ESP_OK) {
-    //     Serial.println("Failed to add peer");
-    //     return;
-    // }
 
     // Register for a callback function that will be called when data is
     // received
