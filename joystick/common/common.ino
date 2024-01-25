@@ -74,6 +74,7 @@ void setup() {
 }
 
 struct JoystickState{
+  char protocol = 0;
   char row[4];
   float j_left_right;
   float j_front_back;

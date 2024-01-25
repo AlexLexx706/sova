@@ -162,39 +162,39 @@ void MoveAnimation::handle(unsigned long cur_time, unsigned long dt) {
     // Serial.println(angle);
 
     switch (type) {
-    case left_hand: {
-        angle = angle > 50 ? 50 : angle;
-        angle = angle < -90 ? -90 : angle;
-        left_hand_servo.write(-angle + 90);
-        break;
-    }
-    case right_hand: {
-        angle = angle > 85 ? 85 : angle;
-        angle = angle < -45 ? -45 : angle;
-        right_hand_servo.write(-angle + 90);
-        break;
-    }
+        case left_hand: {
+            angle = angle > 50 ? 50 : angle;
+            angle = angle < -90 ? -90 : angle;
+            left_hand_servo.write(-angle + 90);
+            break;
+        }
+        case right_hand: {
+            angle = angle > 85 ? 85 : angle;
+            angle = angle < -45 ? -45 : angle;
+            right_hand_servo.write(-angle + 90);
+            break;
+        }
 
-    case head: {
-        angle = angle > 70 ? 70 : angle;
-        angle = angle < -40 ? -40 : angle;
-        head_servo.write(angle + 90);
-        break;
-    }
+        case head: {
+            angle = angle > 70 ? 70 : angle;
+            angle = angle < -40 ? -40 : angle;
+            head_servo.write(angle + 90);
+            break;
+        }
 
-    case neck: {
-        angle = angle > 90 ? 90 : angle;
-        angle = angle < -90 ? -90 : angle;
-        neck_servo.write(angle + 90);
-        break;
-    }
+        case neck: {
+            angle = angle > 90 ? 90 : angle;
+            angle = angle < -90 ? -90 : angle;
+            neck_servo.write(angle + 90);
+            break;
+        }
 
-    case body: {
-        angle = angle > 70 ? 70 : angle;
-        angle = angle < -50 ? -50 : angle;
-        body_servo.write(angle + 90);
-        break;
-    }
+        case body: {
+            angle = angle > 70 ? 70 : angle;
+            angle = angle < -50 ? -50 : angle;
+            body_servo.write(angle + 90);
+            break;
+        }
     }
 }
 void MoveAnimation::stop_handler() {
