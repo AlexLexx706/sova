@@ -107,8 +107,10 @@ class ServoInfo {
     const char * name;
     float min;
     float max;
-    float window = 7.;
-    float cur_angle = 2.;
+    float window = 0.5;
+    float cur_angle = 0.;
+    float smooth_angle = 0.;
+    float smooth_factor = 0.2;
     float len;
 
 public:
@@ -126,13 +128,15 @@ public:
         if (angle > (cur_angle + window) || angle < (cur_angle - window)) {
             cur_angle = angle;
         }
-        servo.write(cur_angle);
+        smooth_angle = cur_angle * smooth_factor + smooth_angle * (1. - smooth_factor);
+
+        servo.write(smooth_angle);
         #ifdef DEBUG_VOODOO_JOYSTICK_ANGLE
             Serial.print(name);
-            Serial.print(" val: ");
-            Serial.print(j_state.values[j_index]);
-            Serial.print(" angle: ");
+            Serial.print(" c_a: ");
             Serial.print(cur_angle);
+            Serial.print(" s_a: ");
+            Serial.print(smooth_angle);
             Serial.print(" ");
         #endif
     }

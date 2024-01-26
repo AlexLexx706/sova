@@ -1,6 +1,10 @@
 #include <WiFi.h>
 #include <Wire.h>
 #include <esp_now.h>
+#include "Filter.h"
+#include "MedianFilterLib.h"
+#include "running_average.h"
+#include "Kalman.h"
 
 #define PRINT_FOR_SERIAL_PLOTTER
 // #define PRINT_NO_LIM
@@ -9,23 +13,44 @@
 // #define PRINT_ESP_NOW_ERROR
 
 // Potentiometers desc
-struct PotDesc {
+class PotDesc {
     int pin;
-    int min;
-    int max;
-    int len;
-    char *name;
-    int row_no_lim;
-    int row_lim;
-    float val;
+    float min;
+    float max;
+    float len;
+    const char *name;
+    int row = 0;
+    float row_lim = 0;
+    ExponentialFilter<float> exp_filter;
+
+public:
+    PotDesc(int _pin, int _min, int _max, const char *_name):
+        pin(_pin),
+        min(_min),
+        max(_max),
+        name(_name),
+        exp_filter(10, 0) {
+            len = max - min;
+    }
+    float read() {
+        row = analogRead(pin);
+        row_lim = row;
+
+        if (row_lim < min) {
+            row_lim = min;
+        } else if (row_lim > max) {
+            row_lim = max;
+        }
+        return exp_filter.Filter((row_lim - min) / len);
+    }
 };
 
 PotDesc descs[] = {
-    {34, 700, 2350, 2350 - 700, "head"},     // head
-    {35, 290, 2320, 2320 - 290, "neak"},     // neak
-    {32, 1450, 3000, 3000 - 1450, "l_wing"}, // left wing
-    {33, 1100, 2600, 2600 - 1100, "r_wing"}, // right wing
-    {39, 600, 3600, 3600 - 600, "body"}      // body
+    {34, 700, 2350, "head"},     // head
+    {35, 290, 2320, "neak"},     // neak
+    {32, 1450, 3000, "l_wing"}, // left wing
+    {33, 1100, 2600, "r_wing"}, // right wing
+    {39, 600, 3600, "body"}      // body
 };
 
 // REPLACE WITH THE MAC Address of your receiver
@@ -80,18 +105,7 @@ struct JoystickState {
 void loop() {
     // Reading potentiometer value
     for (int i = 0; i < sizeof(descs) / sizeof(descs[0]); i++) {
-        PotDesc &cur_desc = descs[i];
-        cur_desc.row_no_lim = analogRead(cur_desc.pin);
-        cur_desc.row_lim = cur_desc.row_no_lim;
-
-        if (cur_desc.row_lim < cur_desc.min) {
-            cur_desc.row_lim = cur_desc.min;
-        } else if (cur_desc.row_lim > cur_desc.max) {
-            cur_desc.row_lim = cur_desc.max;
-        }
-
-        cur_desc.val = (cur_desc.row_lim - cur_desc.min) / float(cur_desc.len);
-        joystick_state.vals[i] = cur_desc.val;
+        joystick_state.vals[i] = descs[i].read();
     }
 
 // Send message via ESP-NOW
@@ -109,51 +123,13 @@ void loop() {
     esp_now_send(0, (const uint8_t *)(&joystick_state), sizeof(joystick_state));
 #endif
 
-// display potentiometers debug
-#ifdef PRINT_NO_LIM
-    Serial.print("No lim: ");
-    for (int i = 0; i < sizeof(descs) / sizeof(descs[0]); i++) {
-        PotDesc &cur_desc = descs[i];
-        Serial.print(cur_desc.name);
-        Serial.print(": ");
-        Serial.print(cur_desc.row_no_lim);
-        Serial.print(" ");
-    }
-    Serial.println();
-#endif
 
 #ifdef PRINT_FOR_SERIAL_PLOTTER
     for (int i = 0; i < sizeof(descs) / sizeof(descs[0]); i++) {
-        PotDesc &cur_desc = descs[i];
-        Serial.print(cur_desc.row_no_lim);
+        Serial.print(joystick_state.vals[i] * 100.);
         Serial.print(" ");
     }
     Serial.println();
 #endif
-
-#ifdef PRINT_WITH_LIM
-    Serial.print("with lim: ");
-    for (int i = 0; i < sizeof(descs) / sizeof(descs[0]); i++) {
-        PotDesc &cur_desc = descs[i];
-        Serial.print(cur_desc.name);
-        Serial.print(": ");
-        Serial.print(cur_desc.row_lim);
-        Serial.print(" ");
-    }
-    Serial.println();
-#endif
-
-#ifdef PRINT_VALUE
-    Serial.print("value: ");
-    for (int i = 0; i < sizeof(descs) / sizeof(descs[0]); i++) {
-        PotDesc &cur_desc = descs[i];
-        Serial.print(cur_desc.name);
-        Serial.print(": ");
-        Serial.print(cur_desc.val);
-        Serial.print(" ");
-    }
-    Serial.println();
-#endif
-
     delay(20);
 }
