@@ -8,7 +8,7 @@
 /*commands stream from UART, ascii symbols:
     debug value
         show/hide, int, stream of axis values: 0 - hide(default), 1 - show
-    clb_start ref_axis min max
+    clb_start clb_axis ref_axis min max
         start calibration of axis: 0-head, 1-neck, 2-left hand,
             3-right hand, 4-body
         clb_axis - int, calibrated axis id
@@ -18,12 +18,13 @@
             which will be interpreted as 0 deg in servo side
         max - float, value in axis value (row) of ref axis
             which will be interpreted as 180 deg in servo side
-    clb_stop apply
-        stop calibration process of axis
-        apply, int:
-            1 - apply (save in SOVA size) calibration for this axis and stop
-                calibration process
+    clb_stop cmd
+        stop calibration of axis
+        cmd - int, command:
             0 - not apply calibration and stop calibration process
+            1 - save point 1
+            2 - save point 2
+            3 - apply calibration and stop calibration process
     reset
         switch to normal mode
 
@@ -39,11 +40,11 @@ char response[MyCommandParser::MAX_RESPONSE_SIZE];
 bool show_debug = false;
 
 struct ModeState {
-    char mode = 0;
+    char mode = 0; // 0 - normal mode, 1 - start calibration, 2 - stop calibration
     char clb_axis = 0;
     char ref_axis = 4;
-    float min = 0;
-    float max = 10;
+    float min = 496;
+    float max = 3293;
 } mode_state;
 
 void cmd_debug(MyCommandParser::Argument *args, char *response) {
@@ -78,13 +79,13 @@ void cmd_start_clb(MyCommandParser::Argument *args, char *response) {
 }
 
 void cmd_stop_clb(MyCommandParser::Argument *args, char *response) {
-    int apply = args[0].asUInt64;
-    Serial.print("apply: ");
-    Serial.println(apply);
+    int cmd = args[0].asUInt64;
+    Serial.print(" cmd: ");
+    Serial.println(cmd);
 
     if (xSemaphoreTake(xMutex, portMAX_DELAY) == pdTRUE) {
         mode_state.mode = 2;
-        mode_state.clb_axis = apply;
+        mode_state.clb_axis = cmd;
         xSemaphoreGive(xMutex);
     }
 }
@@ -222,7 +223,7 @@ void loop() {
 
     if (show_debug) {
         for (int i = 0; i < sizeof(desc) / sizeof(desc[0]); i++) {
-            Serial.print(joystick_state.vals[i] * 100.);
+            Serial.print(joystick_state.vals[i]);
             Serial.print(" ");
         }
         Serial.println();

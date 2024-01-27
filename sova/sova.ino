@@ -1,15 +1,19 @@
+#include "animation.h"
 #include <DFRobotDFPlayerMini.h>
 #include <ESP32Servo.h>
 #include <WiFi.h>
 #include <Wire.h>
 #include <esp_now.h>
-#include "animation.h"
+#include <EEPROM.h>
 
 // Joystick MAC Address
 
 #define LED_FREQ 1000
-//#define DEBUG_VOODOO_JOYSTICK
+// #define DEBUG_VOODOO_JOYSTICK
 #define DEBUG_VOODOO_JOYSTICK_ANGLE
+#define DEBUG_VOODOO_JOYSTICK_CALIBRATION
+
+SemaphoreHandle_t xMutex = NULL; // Create a mutex object
 
 struct JoystickState {
     char protocol;
@@ -19,11 +23,19 @@ struct JoystickState {
     char j_b;
 } joystick_state;
 
+struct ModeState {
+    char mode = 0;
+    char clb_axis = 0;
+    char ref_axis = 4;
+    float min = 0;
+    float max = 10;
+};
+
 struct VoodooJoystickState {
     char protocol;
     float values[5];
+    ModeState mode;
 } voodoo_joystick_state;
-
 
 static DFRobotDFPlayerMini myDFPlayer;
 
@@ -51,7 +63,226 @@ static MoveAnimation move_head_animation(MoveAnimation::head);
 static MoveAnimation move_neck_animation(MoveAnimation::neck);
 static MoveAnimation move_body_animation(MoveAnimation::body);
 
+TaskHandle_t voodoo_task;
+
+struct ServoClbInfo {
+    struct Point {
+        float row = 0;
+        float angle = 0;
+    };
+    Point min;
+    Point max;
+    bool calibrated = false;
+};
+
+ServoClbInfo servo_clb_data[5];
+Servo * voodoo_servos[] = {&head_servo, &neck_servo, &left_hand_servo, &right_hand_servo, &body_servo};
+
+void process_voodoo(void *_) {
+    VoodooJoystickState vj_state;
+    int clb_index = 0;
+    float row = 0;
+    float angle = 0;
+    bool point_calibrated = false;
+
+    for (;;) {
+        if (xSemaphoreTake(xMutex, portMAX_DELAY) == pdTRUE) {
+            vj_state = voodoo_joystick_state;
+            xSemaphoreGive(xMutex);
+        }
+
+        switch (vj_state.mode.mode) {
+        // normal mode
+        case 0: {
+            for (int i = 0; i < sizeof(servo_clb_data) / sizeof(servo_clb_data[1]); i++) {
+                ServoClbInfo &info(servo_clb_data[i]);
+                Servo & servo(*voodoo_servos[i]);
+
+                if (info.calibrated) {
+                    row = vj_state.values[i];
+                    angle = ((row - info.min.row) / (info.max.row - info.min.row)) *
+                            (info.max.angle - info.min.angle) + info.min.angle;
+
+                    //apply constrain
+                    if (info.min.angle < info.max.angle) {
+                        angle = constrain(
+                            angle, info.min.angle, info.max.angle);
+                    } else {
+                        angle = constrain(
+                            angle, info.max.angle, info.min.angle);
+                    }
+                    servo.write(angle);
+
+                    #ifdef DEBUG_VOODOO_JOYSTICK_CALIBRATION
+                        Serial.print("axis: ");
+                        Serial.print(i);
+
+                        Serial.print(" row: ");
+                        Serial.print(row);
+
+                        Serial.print(" angle: ");
+                        Serial.print(angle);
+
+                        Serial.print(" min_row:");
+                        Serial.print(info.min.row);
+
+                        Serial.print(" min_angle:");
+                        Serial.print(info.min.angle);
+
+                        Serial.print(" max_row:");
+                        Serial.print(info.max.row);
+
+                        Serial.print(" max_angle:");
+                        Serial.println(info.max.angle);
+                    #endif
+                } else {
+                    servo.release();
+                }
+            }
+            break;
+        }
+        // calibration
+        case 1: {
+            ModeState &mode(vj_state.mode);
+            clb_index = mode.clb_axis;
+            servo_clb_data[clb_index].calibrated = false;
+            point_calibrated = false;
+
+            row = vj_state.values[clb_index];
+            angle = map(vj_state.values[mode.ref_axis], mode.min, mode.max, 0.,
+                        180.);
+            angle = constrain(angle, 0., 180.);
+
+            #ifdef DEBUG_VOODOO_JOYSTICK_CALIBRATION
+                // send cur angle
+                Serial.print("clb: clb_axis: ");
+                Serial.print(clb_index);
+
+                Serial.print(" ref_axis: ");
+                Serial.print(int(mode.ref_axis));
+
+                Serial.print(" min: ");
+                Serial.print(mode.min);
+
+                Serial.print(" max: ");
+                Serial.print(mode.max);
+
+                Serial.print(" row: ");
+                Serial.print(row);
+
+                Serial.print(" angle: ");
+                Serial.println(angle);
+            #endif
+            // servo_clb_data[clb_index].servo.release();
+            voodoo_servos[clb_index]->write(angle);
+            break;
+        }
+        // stop calib
+        case 2: {
+            ModeState &mode(vj_state.mode);
+            switch (mode.clb_axis) {
+            case 0: {
+                if (!servo_clb_data[clb_index].calibrated) {
+                    servo_clb_data[clb_index].calibrated = false;
+                    #ifdef DEBUG_VOODOO_JOYSTICK_CALIBRATION
+                        Serial.print("reset clb:");
+                        Serial.println(clb_index);
+                    #endif
+                    voodoo_servos[clb_index]->release();
+                }
+                break;
+            }
+            // save point 1
+            case 1: {
+                if (!point_calibrated) {
+                    point_calibrated = true;
+                    servo_clb_data[clb_index].min.angle = angle;
+                    servo_clb_data[clb_index].min.row = row;
+                    voodoo_servos[clb_index]->release();
+
+                    #ifdef DEBUG_VOODOO_JOYSTICK_CALIBRATION
+                        Serial.print("set min clb point axis:");
+                        Serial.print(clb_index);
+
+                        Serial.print(" row:");
+                        Serial.print(servo_clb_data[clb_index].min.row);
+                        Serial.print(" angle:");
+                        Serial.println(servo_clb_data[clb_index].min.angle);
+                    #endif
+                }
+                break;
+            }
+            // save point 2
+            case 2: {
+                if (!point_calibrated) {
+                    point_calibrated = true;
+                    servo_clb_data[clb_index].max.angle = angle;
+                    servo_clb_data[clb_index].max.row = row;
+                    voodoo_servos[clb_index]->release();
+
+                    #ifdef DEBUG_VOODOO_JOYSTICK_CALIBRATION
+                        Serial.print("set max clb point axis:");
+                        Serial.print(clb_index);
+
+                        Serial.print(" row:");
+                        Serial.print(servo_clb_data[clb_index].max.row);
+                        Serial.print(" angle:");
+                        Serial.println(servo_clb_data[clb_index].max.angle);
+                    #endif
+                }
+                break;
+            }
+            //save calibration
+            case 3: {
+                if (!servo_clb_data[clb_index].calibrated) {
+                    servo_clb_data[clb_index].calibrated = true;
+
+                    //save calibration for axis
+                    EEPROM.write(static_cast<int>(
+                        &servo_clb_data[clb_index] - servo_clb_data),
+                        sizeof(servo_clb_data[0]));
+
+                    EEPROM.commit();
+
+                    voodoo_servos[clb_index]->release();
+
+                    #ifdef DEBUG_VOODOO_JOYSTICK_CALIBRATION
+                        Serial.print("apply clb axis:");
+                        Serial.println(clb_index);
+
+                        Serial.print(" min_row:");
+                        Serial.print(servo_clb_data[clb_index].min.row);
+
+                        Serial.print(" min_angle:");
+                        Serial.print(servo_clb_data[clb_index].min.angle);
+
+                        Serial.print(" max_row:");
+                        Serial.print(servo_clb_data[clb_index].max.row);
+
+                        Serial.print(" max_angle:");
+                        Serial.print(servo_clb_data[clb_index].max.angle);
+                    #endif
+                }
+                break;
+            }
+            }
+            break;
+        }
+        }
+        delay(20);
+    }
+}
+
 void setup() {
+    xMutex = xSemaphoreCreateMutex(); // crete a mutex object
+
+    servo_clb_data[0].min.row = 1890.72;
+    servo_clb_data[0].min.angle = 123.00;
+
+    servo_clb_data[0].max.row = 945.61;
+    servo_clb_data[0].max.angle = 49.00;
+    servo_clb_data[0].calibrated = true;
+
     last_msg_time = millis();
     right_hand_servo.attach(18);
     left_hand_servo.attach(13);
@@ -71,6 +302,23 @@ void setup() {
 
     Serial2.begin(9600);
     Serial.begin(115200);
+
+    //reading calibration 
+    EEPROM.begin(sizeof(servo_clb_data));
+    EEPROM.readBytes(0, servo_clb_data, sizeof(servo_clb_data));
+
+    Serial.println(F("Calibration info:"));
+    for (int i=0; i < sizeof(servo_clb_data)/sizeof(servo_clb_data[0]); i++) {
+        ServoClbInfo & info(servo_clb_data[i]);
+
+        Serial.print(F("axis:")); Serial.println(i);
+        Serial.print(F("calibration:")); Serial.println(info.calibrated);
+        Serial.print(F("min_row:")); Serial.println(info.min.row);
+        Serial.print(F("min_angle:")); Serial.println(info.min.angle);
+        Serial.print(F("max_row:")); Serial.println(info.max.row);
+        Serial.print(F("max_angle:")); Serial.println(info.max.angle); Serial.println();
+    }
+
     if (!myDFPlayer.begin(Serial2)) { // Serial2 to communicate with mp3.
         Serial.println(F("Unable to begin:"));
         Serial.println(F("1.Please recheck the connection!"));
@@ -99,12 +347,21 @@ void setup() {
     // Register for a callback function that will be called when data is
     // received
     esp_now_register_recv_cb(on_data_recv);
+
+    xTaskCreatePinnedToCore(
+        process_voodoo, /* Task function. */
+        "voodoo",       /* name of task. */
+        10000,          /* Stack size of task */
+        NULL,           /* parameter of the task */
+        1,              /* priority of the task */
+        &voodoo_task,   /* Task handle to keep track of created task */
+        0);             /* pin task to core 0 */
 }
 
 class ServoInfo {
-    Servo & servo;
+    Servo &servo;
     int j_index;
-    const char * name;
+    const char *name;
     float min;
     float max;
     float window = 0.5;
@@ -113,32 +370,30 @@ class ServoInfo {
     float smooth_factor = 0.2;
     float len;
 
-public:
-    ServoInfo(Servo & _servo, int _j_index, const char * _name, float _min, float _max):
-        servo(_servo),
-        j_index(_j_index),
-        name(_name),
-        min(_min),
-        max(_max) {
-            len = max - min;
+ public:
+    ServoInfo(Servo &_servo, int _j_index, const char *_name, float _min,
+              float _max)
+        : servo(_servo), j_index(_j_index), name(_name), min(_min), max(_max) {
+        len = max - min;
     }
 
-    void set_angle(const VoodooJoystickState & j_state) {
+    void set_angle(const VoodooJoystickState &j_state) {
         float angle = j_state.values[j_index] * len + min;
         if (angle > (cur_angle + window) || angle < (cur_angle - window)) {
             cur_angle = angle;
         }
-        smooth_angle = cur_angle * smooth_factor + smooth_angle * (1. - smooth_factor);
+        smooth_angle =
+            cur_angle * smooth_factor + smooth_angle * (1. - smooth_factor);
 
         servo.write(smooth_angle);
-        #ifdef DEBUG_VOODOO_JOYSTICK_ANGLE
-            Serial.print(name);
-            Serial.print(" c_a: ");
-            Serial.print(cur_angle);
-            Serial.print(" s_a: ");
-            Serial.print(smooth_angle);
-            Serial.print(" ");
-        #endif
+#ifdef DEBUG_VOODOO_JOYSTICK_ANGLE
+        Serial.print(name);
+        Serial.print(" c_a: ");
+        Serial.print(cur_angle);
+        Serial.print(" s_a: ");
+        Serial.print(smooth_angle);
+        Serial.print(" ");
+#endif
     }
 };
 
@@ -147,43 +402,44 @@ ServoInfo servos_limits[] = {
     {neck_servo, 1, "neck", -90 + 90, 90 + 90},
     {left_hand_servo, 2, "left_wing", -50 + 90, 90 + 90},
     {right_hand_servo, 3, "right_wing", -85 + 90, 45 + 90},
-    {body_servo, 4, "body", -50 + 90, 70 + 90}
-};
+    {body_servo, 4, "body", -50 + 90, 70 + 90}};
 
 void process_voodoo_joystick(const uint8_t *incoming_data, int len) {
     if (len == sizeof(voodoo_joystick_state)) {
-        voodoo_joystick_state = *reinterpret_cast<const VoodooJoystickState *>(incoming_data);
-
-        #ifdef DEBUG_VOODOO_JOYSTICK
-            for (int i = 0;
-                i < sizeof(voodoo_joystick_state.values) /
-                    sizeof(voodoo_joystick_state.values[1]);
-                i++) {
-                Serial.print(voodoo_joystick_state.values[i]);
-                Serial.print(" ");
-            }
-            Serial.println();
-        #endif
-
-        for (auto & s_info: servos_limits) {
-            s_info.set_angle(voodoo_joystick_state);
+        if (xSemaphoreTake(xMutex, portMAX_DELAY) == pdTRUE) {
+            voodoo_joystick_state =
+                *reinterpret_cast<const VoodooJoystickState *>(incoming_data);
+            xSemaphoreGive(xMutex);
         }
-        #ifdef DEBUG_VOODOO_JOYSTICK_ANGLE
-            Serial.println();
-        #endif
+        // #ifdef DEBUG_VOODOO_JOYSTICK
+        //     for (int i = 0;
+        //         i < sizeof(voodoo_joystick_state.values) /
+        //             sizeof(voodoo_joystick_state.values[1]);
+        //         i++) {
+        //         Serial.print(voodoo_joystick_state.values[i]);
+        //         Serial.print(" ");
+        //     }
+        //     Serial.println();
+        // #endif
+
+        // for (auto & s_info: servos_limits) {
+        //     s_info.set_angle(voodoo_joystick_state);
+        // }
+        // #ifdef DEBUG_VOODOO_JOYSTICK_ANGLE
+        //     Serial.println();
+        // #endif
     }
 }
-
 
 // Callback when data is received
 void on_data_recv(const uint8_t *mac, const uint8_t *incoming_data, int len) {
     if (len == 0) {
         return;
     }
-    //processing of voodoo joystick
+    // processing of voodoo joystick
     if (incoming_data[0] == 1) {
         process_voodoo_joystick(incoming_data, len);
-    //processing of normal joystick
+        // processing of normal joystick
     } else if (incoming_data[0] == 0) {
         if (len == sizeof(JoystickState)) {
             joystick_state = *(JoystickState *)(incoming_data);
@@ -245,7 +501,8 @@ void on_data_recv(const uint8_t *mac, const uint8_t *incoming_data, int len) {
                 static float angle = 0.;
                 if (joystick_state.row[2] & 0x1) {
                     move_left_hand_animation.start();
-                    move_left_hand_animation.set_speed(joystick_state.j_front_back);
+                    move_left_hand_animation.set_speed(
+                        joystick_state.j_front_back);
                     move_right_hand_animation.start();
                     move_right_hand_animation.set_speed(
                         joystick_state.j_left_right);
@@ -281,9 +538,9 @@ void on_data_recv(const uint8_t *mac, const uint8_t *incoming_data, int len) {
             }
 
             if (wheel_active && (joystick_state.j_front_back > 0.05 ||
-                                joystick_state.j_front_back < -0.05 ||
-                                joystick_state.j_left_right > 0.05 ||
-                                joystick_state.j_left_right < -0.05)) {
+                                 joystick_state.j_front_back < -0.05 ||
+                                 joystick_state.j_left_right > 0.05 ||
+                                 joystick_state.j_left_right < -0.05)) {
 
                 const float max_speed = 30.;
                 const float max_rotation = 15.;
