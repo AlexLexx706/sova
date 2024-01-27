@@ -1,64 +1,163 @@
+#include "exponential_filter.h"
+#include <CommandParser.h>
+#include <EEPROM.h>
 #include <WiFi.h>
 #include <Wire.h>
 #include <esp_now.h>
-#include "Filter.h"
-#include "MedianFilterLib.h"
-#include "running_average.h"
-#include "Kalman.h"
 
-#define PRINT_FOR_SERIAL_PLOTTER
-// #define PRINT_NO_LIM
-// #define PRINT_WITH_LIM
-// #define PRINT_VALUE
-// #define PRINT_ESP_NOW_ERROR
+/*commands stream from UART, ascii symbols:
+    debug value
+        show/hide, int, stream of axis values: 0 - hide(default), 1 - show
+    clb_start ref_axis min max
+        start calibration of axis: 0-head, 1-neck, 2-left hand,
+            3-right hand, 4-body
+        clb_axis - int, calibrated axis id
+        ref_axis - int, reference axis id,
+            used for rotating servo in correct position
+        min - float, value in axis value (row) of ref axis
+            which will be interpreted as 0 deg in servo side
+        max - float, value in axis value (row) of ref axis
+            which will be interpreted as 180 deg in servo side
+    clb_stop apply
+        stop calibration process of axis
+        apply, int:
+            1 - apply (save in SOVA size) calibration for this axis and stop
+                calibration process
+            0 - not apply calibration and stop calibration process
+    reset
+        switch to normal mode
+
+*/
+typedef CommandParser<> MyCommandParser;
+
+MyCommandParser parser;
+TaskHandle_t cmd_task;
+SemaphoreHandle_t xMutex = NULL; // Create a mutex object
+
+char line[128];
+char response[MyCommandParser::MAX_RESPONSE_SIZE];
+bool show_debug = false;
+
+struct ModeState {
+    char mode = 0;
+    char clb_axis = 0;
+    char ref_axis = 4;
+    float min = 0;
+    float max = 10;
+} mode_state;
+
+void cmd_debug(MyCommandParser::Argument *args, char *response) {
+    show_debug = bool(args[0].asInt64);
+    Serial.print("show_debug: ");
+    Serial.println(show_debug);
+}
+
+void cmd_start_clb(MyCommandParser::Argument *args, char *response) {
+    int clb_axis = args[0].asUInt64;
+    int ref_axis = args[1].asUInt64;
+    float min = args[2].asDouble;
+    float max = args[3].asDouble;
+
+    Serial.print("clb_axis: ");
+    Serial.print(clb_axis);
+    Serial.print(" ref_axis: ");
+    Serial.print(ref_axis);
+    Serial.print(" min: ");
+    Serial.print(min);
+    Serial.print(" max: ");
+    Serial.println(max);
+
+    if (xSemaphoreTake(xMutex, portMAX_DELAY) == pdTRUE) {
+        mode_state.mode = 1;
+        mode_state.clb_axis = clb_axis;
+        mode_state.ref_axis = ref_axis;
+        mode_state.min = min;
+        mode_state.max = max;
+        xSemaphoreGive(xMutex);
+    }
+}
+
+void cmd_stop_clb(MyCommandParser::Argument *args, char *response) {
+    int apply = args[0].asUInt64;
+    Serial.print("apply: ");
+    Serial.println(apply);
+
+    if (xSemaphoreTake(xMutex, portMAX_DELAY) == pdTRUE) {
+        mode_state.mode = 2;
+        mode_state.clb_axis = apply;
+        xSemaphoreGive(xMutex);
+    }
+}
+
+void cmd_reset_clb(MyCommandParser::Argument *args, char *response) {
+    Serial.println("normal mode");
+
+    if (xSemaphoreTake(xMutex, portMAX_DELAY) == pdTRUE) {
+        mode_state.mode = 0;
+        xSemaphoreGive(xMutex);
+    }
+}
+
+void cmd_test(MyCommandParser::Argument *args, char *response) {
+    Serial.print("string: ");
+    Serial.println(args[0].asString);
+    Serial.print("double: ");
+    Serial.println(args[1].asDouble);
+    Serial.print("int64: ");
+    Serial.println(
+        (int32_t)args[2].asInt64); // NOTE: on older AVR-based boards, Serial
+                                   // doesn't support printing 64-bit values, so
+                                   // we'll cast it down to 32-bit
+    Serial.print("uint64: ");
+    Serial.println(
+        (uint32_t)args[3].asUInt64); // NOTE: on older AVR-based boards, Serial
+                                     // doesn't support printing 64-bit values,
+                                     // so we'll cast it down to 32-bit
+}
+
+void process_cmd(void *_) {
+    for (;;) {
+        if (Serial.available()) {
+            size_t lineLength =
+                Serial.readBytesUntil('\n', line, sizeof(line) - 1);
+            line[lineLength] = '\0';
+            parser.processCommand(line, response);
+        } else {
+            delay(20);
+        }
+    }
+}
 
 // Potentiometers desc
 class PotDesc {
     int pin;
-    float min;
-    float max;
-    float len;
-    const char *name;
-    int row = 0;
-    float row_lim = 0;
+    int row;
     ExponentialFilter<float> exp_filter;
 
-public:
-    PotDesc(int _pin, int _min, int _max, const char *_name):
-        pin(_pin),
-        min(_min),
-        max(_max),
-        name(_name),
-        exp_filter(10, 0) {
-            len = max - min;
-    }
+ public:
+    PotDesc(int _pin) : pin(_pin), row(0), exp_filter(10., 0.) {}
+
     float read() {
         row = analogRead(pin);
-        row_lim = row;
-
-        if (row_lim < min) {
-            row_lim = min;
-        } else if (row_lim > max) {
-            row_lim = max;
-        }
-        return exp_filter.Filter((row_lim - min) / len);
+        return exp_filter.Filter(row);
     }
 };
 
-PotDesc descs[] = {
-    {34, 700, 2350, "head"},     // head
-    {35, 290, 2320, "neak"},     // neak
-    {32, 1450, 3000, "l_wing"}, // left wing
-    {33, 1100, 2600, "r_wing"}, // right wing
-    {39, 600, 3600, "body"}      // body
+PotDesc desc[] = {
+    {34}, // head
+    {35}, // neck
+    {32}, // left wing
+    {33}, // right wing
+    {39}  // body
 };
 
 // REPLACE WITH THE MAC Address of your receiver
-uint8_t rev_1_address[] = {0x08, 0xD1, 0xF9, 0x99, 0x3F, 0x9C};
 uint8_t rev_2_address[] = {0xB0, 0xB2, 0x1C, 0x0A, 0x07, 0x08};
 esp_now_peer_info_t peerInfo;
 
 void setup() {
+    xMutex = xSemaphoreCreateMutex(); // crete a mutex object
+
     Serial.begin(115200);
 
     // // Set device as a Wi-Fi Station
@@ -73,15 +172,6 @@ void setup() {
     peerInfo.channel = 0;
     peerInfo.encrypt = false;
 
-    // Register peer rev-1
-    memcpy(peerInfo.peer_addr, rev_1_address, sizeof(rev_1_address));
-
-    // Add peer
-    if (esp_now_add_peer(&peerInfo) != ESP_OK) {
-        Serial.println("Failed to add peer");
-        return;
-    }
-
     // Register peer rev-2
     memcpy(peerInfo.peer_addr, rev_2_address, sizeof(rev_2_address));
 
@@ -91,8 +181,20 @@ void setup() {
         return;
     }
 
-    // set the resolution to 12 bits (0-4096)
-    analogReadResolution(12);
+    parser.registerCommand("TEST", "sdiu", &cmd_test);
+    parser.registerCommand("debug", "i", &cmd_debug);
+    parser.registerCommand("clb_start", "uudd", &cmd_start_clb);
+    parser.registerCommand("clb_stop", "u", &cmd_stop_clb);
+    parser.registerCommand("reset", "", &cmd_reset_clb);
+
+    xTaskCreatePinnedToCore(
+        process_cmd, /* Task function. */
+        "cmd",       /* name of task. */
+        10000,       /* Stack size of task */
+        NULL,        /* parameter of the task */
+        1,           /* priority of the task */
+        &cmd_task,   /* Task handle to keep track of created task */
+        0);          /* pin task to core 0 */
 
     delay(1000);
 }
@@ -100,36 +202,30 @@ void setup() {
 struct JoystickState {
     char protocol = 1;
     float vals[5] = {0};
+    ModeState mode;
 } joystick_state;
 
 void loop() {
     // Reading potentiometer value
-    for (int i = 0; i < sizeof(descs) / sizeof(descs[0]); i++) {
-        joystick_state.vals[i] = descs[i].read();
+    for (int i = 0; i < sizeof(desc) / sizeof(desc[0]); i++) {
+        joystick_state.vals[i] = desc[i].read();
     }
 
-// Send message via ESP-NOW
-// display send result
-#ifdef PRINT_ESP_NOW_ERROR
-    esp_err_t result = esp_now_send(0, (const uint8_t *)(&joystick_state),
-                                    sizeof(joystick_state));
-
-    if (result == ESP_OK) {
-        Serial.println("Sent with success");
-    } else {
-        Serial.println("Error sending the data");
+    // update current state
+    if (xSemaphoreTake(xMutex, portMAX_DELAY) == pdTRUE) {
+        joystick_state.mode = mode_state;
+        xSemaphoreGive(xMutex);
     }
-#else
+
+    // Send message via ESP-NOW
     esp_now_send(0, (const uint8_t *)(&joystick_state), sizeof(joystick_state));
-#endif
 
-
-#ifdef PRINT_FOR_SERIAL_PLOTTER
-    for (int i = 0; i < sizeof(descs) / sizeof(descs[0]); i++) {
-        Serial.print(joystick_state.vals[i] * 100.);
-        Serial.print(" ");
+    if (show_debug) {
+        for (int i = 0; i < sizeof(desc) / sizeof(desc[0]); i++) {
+            Serial.print(joystick_state.vals[i] * 100.);
+            Serial.print(" ");
+        }
+        Serial.println();
     }
-    Serial.println();
-#endif
     delay(20);
 }
