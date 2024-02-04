@@ -76,7 +76,43 @@ struct ServoClbInfo {
 };
 
 ServoClbInfo servo_clb_data[5];
-Servo * voodoo_servos[] = {&head_servo, &neck_servo, &left_hand_servo, &right_hand_servo, &body_servo};
+class ServoWrapper {
+    Servo & servo;
+    float angle;
+    bool first=true;
+public:
+    inline static float period = 0.1; //1. second
+
+    ServoWrapper(Servo & _servo):servo(_servo) {
+
+    }
+
+    void release() {
+        servo.release();
+        first = true;
+    }
+
+    void write_filtered(float _angle, float factor) {
+        if (first) {
+            angle = _angle;
+            first = false;
+        }
+        angle += factor * (_angle - angle);
+        servo.write(angle);
+    }
+
+
+    void write(float _angle) {
+        servo.write(angle);
+    }
+};
+
+ServoWrapper voodoo_servos[] = {
+    head_servo,
+    neck_servo,
+    left_hand_servo,
+    right_hand_servo,
+    body_servo};
 
 void process_voodoo(void *_) {
     VoodooJoystickState vj_state;
@@ -110,7 +146,7 @@ void process_voodoo(void *_) {
         // no connection to joystick
         if (last_packet_timeout >= 1000) {
             for (int i = 0; i < sizeof(servo_clb_data) / sizeof(servo_clb_data[1]); i++) {
-                Servo & servo(*voodoo_servos[i]);
+                ServoWrapper & servo(voodoo_servos[i]);
                 servo.release();
             }
         // joystick alive
@@ -118,9 +154,12 @@ void process_voodoo(void *_) {
             switch (vj_state.mode.mode) {
                 // normal mode
                 case 0: {
+                    float dt_sec = dt/1000.;
+                    float factor = dt_sec / ServoWrapper::period;
+
                     for (int i = 0; i < sizeof(servo_clb_data) / sizeof(servo_clb_data[1]); i++) {
                         ServoClbInfo &info(servo_clb_data[i]);
-                        Servo & servo(*voodoo_servos[i]);
+                        ServoWrapper & servo(voodoo_servos[i]);
 
                         if (info.calibrated) {
                             row = vj_state.values[i];
@@ -135,7 +174,7 @@ void process_voodoo(void *_) {
                                 angle = constrain(
                                     angle, info.max.angle, info.min.angle);
                             }
-                            servo.write(angle);
+                            servo.write_filtered(angle, factor);
 
                             #ifdef DEBUG_VOODOO_JOYSTICK_CALIBRATION
                                 Serial.print("axis: ");
@@ -198,7 +237,7 @@ void process_voodoo(void *_) {
                         Serial.println(angle);
                     #endif
                     // servo_clb_data[clb_index].servo.release();
-                    voodoo_servos[clb_index]->write(angle);
+                    voodoo_servos[clb_index].write(angle);
                     break;
                 }
                 // stop calib
@@ -213,7 +252,7 @@ void process_voodoo(void *_) {
                                     Serial.print("reset clb:");
                                     Serial.println(clb_index);
                                 #endif
-                                voodoo_servos[clb_index]->release();
+                                voodoo_servos[clb_index].release();
                             }
                             break;
                         }
@@ -223,7 +262,7 @@ void process_voodoo(void *_) {
                                 point_calibrated = true;
                                 servo_clb_data[clb_index].min.angle = angle;
                                 servo_clb_data[clb_index].min.row = row;
-                                voodoo_servos[clb_index]->release();
+                                voodoo_servos[clb_index].release();
 
                                 #ifdef DEBUG_VOODOO_JOYSTICK_CALIBRATION
                                     Serial.print("set min clb point axis:");
@@ -243,7 +282,7 @@ void process_voodoo(void *_) {
                                 point_calibrated = true;
                                 servo_clb_data[clb_index].max.angle = angle;
                                 servo_clb_data[clb_index].max.row = row;
-                                voodoo_servos[clb_index]->release();
+                                voodoo_servos[clb_index].release();
 
                                 #ifdef DEBUG_VOODOO_JOYSTICK_CALIBRATION
                                     Serial.print("set max clb point axis:");
@@ -270,7 +309,7 @@ void process_voodoo(void *_) {
 
                                 EEPROM.commit();
 
-                                voodoo_servos[clb_index]->release();
+                                voodoo_servos[clb_index].release();
 
                                 #ifdef DEBUG_VOODOO_JOYSTICK_CALIBRATION
                                     Serial.print("apply clb axis:");
