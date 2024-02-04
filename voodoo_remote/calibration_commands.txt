@@ -1,0 +1,42 @@
+//head
+clb_start 0 4 496 3293
+clb_stop 1
+clb_start 0 4 496 3293
+clb_stop 2
+clb_stop 3
+reset
+
+//neck
+clb_start 1 4 496 3293
+clb_stop 1
+clb_start 1 4 496 3293
+clb_stop 2
+clb_stop 3
+reset
+
+
+//left hand
+clb_start 2 4 496 3293
+clb_stop 1
+clb_start 2 4 496 3293
+clb_stop 2
+clb_stop 3
+reset
+
+
+//right hand
+clb_start 3 4 496 3293
+clb_stop 1
+clb_start 3 4 496 3293
+clb_stop 2
+clb_stop 3
+reset
+
+
+//body
+clb_start 4 2 1100 3000
+clb_stop 1
+clb_start 4 2 1100 3000
+clb_stop 2
+clb_stop 3
+reset

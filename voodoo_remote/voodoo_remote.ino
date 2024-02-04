@@ -140,7 +140,8 @@ class PotDesc {
 
     float read() {
         row = analogRead(pin);
-        return exp_filter.Filter(row);
+        //return exp_filter.Filter(row);
+        return row;
     }
 };
 
@@ -153,7 +154,8 @@ PotDesc desc[] = {
 };
 
 // REPLACE WITH THE MAC Address of your receiver
-uint8_t rev_2_address[] = {0xB0, 0xB2, 0x1C, 0x0A, 0x07, 0x08};
+uint8_t rev_2_address[] = {0xA8, 0x42, 0xE3, 0xCE, 0x2C, 0xD8};
+
 esp_now_peer_info_t peerInfo;
 
 void setup() {
