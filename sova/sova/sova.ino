@@ -78,10 +78,17 @@ struct ServoClbInfo {
 ServoClbInfo servo_clb_data[5];
 class ServoWrapper {
     Servo & servo;
-    float angle;
-    bool first=true;
+    float prev_angle;
+    float smoothing_angle;
+    float smoothing_rate;
+    bool first_angle=true;
+    bool first_rate;
+    float release_timeout = 0.;
 public:
-    inline static float period = 0.1; //1. second
+    inline static float angle_smoothing_period = 0.1; //1. second
+    inline static float rate_smoothing_period = 0.1; //1. second
+    inline static float release_rate = 10.;
+    inline static float max_release_timeout = 1.;
 
     ServoWrapper(Servo & _servo):servo(_servo) {
 
@@ -89,20 +96,51 @@ public:
 
     void release() {
         servo.release();
-        first = true;
+        first_angle = true;
     }
 
-    void write_filtered(float _angle, float factor) {
-        if (first) {
-            angle = _angle;
-            first = false;
+    void write_filtered(float angle, float dt_sec) {
+        //init smoothing angle
+        if (first_angle) {
+            smoothing_angle = angle;
+            first_angle = false;
+            first_rate = true;
+        } else {
+            //calculate rate
+            float rate = (angle - prev_angle) / dt_sec;
+            // rate2 = rate2 * rate2;
+
+            //init smoothing rate
+            if (first_rate) {
+                first_rate = false;
+                smoothing_rate = rate;
+            }
+            //calculate rate
+            smoothing_rate += (dt_sec / rate_smoothing_period) * (rate - smoothing_rate);
         }
-        angle += factor * (_angle - angle);
-        servo.write(angle);
+        //smoothing angle
+        smoothing_angle += (dt_sec / angle_smoothing_period) * (angle - smoothing_angle);
+
+        //checking release timeout
+        if (fabs(smoothing_rate) < release_rate) {
+            release_timeout += dt_sec;
+        } else {
+            release_timeout = 0.;
+        }
+
+        //release data
+        if (release_timeout >= max_release_timeout) {
+            //protect overflow
+            release_timeout = max_release_timeout;
+            servo.release();
+        } else {
+            servo.write(smoothing_angle);
+        }
+        prev_angle = angle;
     }
 
 
-    void write(float _angle) {
+    void write(float angle) {
         servo.write(angle);
     }
 };
@@ -128,9 +166,8 @@ void process_voodoo(void *_) {
         //calculate joystick packet delay
         unsigned long cur_time = millis();
         unsigned long dt = cur_time - last_time;
-
+        last_time = cur_time;
         last_packet_timeout += dt;
-        last_time = cur_time;  
 
         //reading joystick data
         if (xSemaphoreTake(xMutex, portMAX_DELAY) == pdTRUE) {
@@ -154,8 +191,7 @@ void process_voodoo(void *_) {
             switch (vj_state.mode.mode) {
                 // normal mode
                 case 0: {
-                    float dt_sec = dt/1000.;
-                    float factor = dt_sec / ServoWrapper::period;
+                    float dt_sec = dt / 1000.;
 
                     for (int i = 0; i < sizeof(servo_clb_data) / sizeof(servo_clb_data[1]); i++) {
                         ServoClbInfo &info(servo_clb_data[i]);
@@ -174,7 +210,7 @@ void process_voodoo(void *_) {
                                 angle = constrain(
                                     angle, info.max.angle, info.min.angle);
                             }
-                            servo.write_filtered(angle, factor);
+                            servo.write_filtered(angle, dt_sec);
 
                             #ifdef DEBUG_VOODOO_JOYSTICK_CALIBRATION
                                 Serial.print("axis: ");
@@ -335,7 +371,7 @@ void process_voodoo(void *_) {
                 }
             }
         }
-        delay(20);
+        delay(10);
     }
 }
 
