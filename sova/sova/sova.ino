@@ -119,11 +119,15 @@ static SequenceAnimation::Command body_servo_commands[] = {
     {false, 7000, 0, 0},
     {true, 0, 60, 120},
 };
+
 static SequenceAnimation body_servo_sequence_animation(
     body_servo,
     body_servo_commands,
     sizeof(body_servo_commands) / sizeof(body_servo_commands[0]));
 
+static TimeAnimation left_hand_sequence_animation(left_hand_servo);
+static TimeAnimation right_hand_sequence_animation(right_hand_servo);
+static TimeAnimation head_sequence_animation(head_servo);
 
 
 TaskHandle_t voodoo_task;
@@ -658,6 +662,31 @@ void on_data_recv(const uint8_t *mac, const uint8_t *incoming_data, int len) {
                 myDFPlayer.start();
                 led_animation.set_params(600, 3000, 700);
                 led_animation.start();
+
+                if (!left_hand_sequence_animation.is_active()) {
+                    static TimeAnimation::Command left_hand_commands[] = {
+                        {0, 0},
+                        {60, 2},
+                        {0, 4},
+                    };
+
+                    left_hand_sequence_animation.set_commands(
+                        left_hand_commands,
+                        sizeof(left_hand_commands) / sizeof(left_hand_commands[0]));
+                    left_hand_sequence_animation.start();
+
+                    static TimeAnimation::Command right_hand_commands[] = {
+                        {0, 0},
+                        {-60, 2},
+                        {0, 4},
+                    };
+
+                    right_hand_sequence_animation.set_commands(
+                        right_hand_commands,
+                        sizeof(right_hand_commands) / sizeof(right_hand_commands[0]));
+                    right_hand_sequence_animation.start();
+                }
+
             }
             // sound 2 - *
             if (joystick_state.row[3] & 0x2) {
@@ -665,6 +694,54 @@ void on_data_recv(const uint8_t *mac, const uint8_t *incoming_data, int len) {
                 myDFPlayer.start();
                 led_animation.set_params(500, 1500, 700);
                 led_animation.start();
+
+                if (!left_hand_sequence_animation.is_active()) {
+                    static TimeAnimation::Command left_hand_commands[] = {
+                        {0,   0     + 0.6},
+                        {0,   0.44  + 0.6},
+                        {50,  0.6   + 0.6},
+                        {0,   0.7   + 0.6},
+                        {0,   0.8   + 0.6},
+                        {50,  1.    + 0.6},
+                        {0,   1.2   + 0.6},
+                    };
+
+                    left_hand_sequence_animation.set_commands(
+                        left_hand_commands,
+                        sizeof(left_hand_commands) / sizeof(left_hand_commands[0]));
+                    left_hand_sequence_animation.start();
+
+                    static TimeAnimation::Command right_hand_commands[] = {
+                        {0,   0     + 0.6},
+                        {0,   0.44  + 0.6},
+                        {-50,  0.6   + 0.6},
+                        {0,   0.7   + 0.6},
+                        {0,   0.8   + 0.6},
+                        {-50,  1.    + 0.6},
+                        {0,   1.2   + 0.6},
+                    };
+
+                    right_hand_sequence_animation.set_commands(
+                        right_hand_commands,
+                        sizeof(right_hand_commands) / sizeof(right_hand_commands[0]));
+                    right_hand_sequence_animation.start();
+
+                    static TimeAnimation::Command head_commands[] = {
+                        {0,   0     + 0.6},
+                        {0,   0.44  + 0.6},
+                        {10,  0.6   + 0.6},
+                        {0,   0.7   + 0.6},
+                        {0,   0.8   + 0.6},
+                        {10,  1.    + 0.6},
+                        {0,   1.2   + 0.6},
+                    };
+
+                    head_sequence_animation.set_commands(
+                        head_commands,
+                        sizeof(head_commands) / sizeof(head_commands[0]));
+                    head_sequence_animation.start();
+                }
+
             }
             // sound 3 - *
             if (joystick_state.row[3] & 0x4) {
@@ -672,6 +749,44 @@ void on_data_recv(const uint8_t *mac, const uint8_t *incoming_data, int len) {
                 myDFPlayer.start();
                 led_animation.set_params(500, 1000, 600);
                 led_animation.start();
+
+                if (!left_hand_sequence_animation.is_active()) {
+                    static TimeAnimation::Command left_hand_commands[] = {
+                        {0,   0    + 0.5},
+                        {0,   0.28 + 0.5},
+                        {20,  0.7  + 0.5},
+                        {0,   1.1  + 0.5},
+                    };
+
+                    left_hand_sequence_animation.set_commands(
+                        left_hand_commands,
+                        sizeof(left_hand_commands) / sizeof(left_hand_commands[0]));
+                    left_hand_sequence_animation.start();
+
+                    static TimeAnimation::Command right_hand_commands[] = {
+                        {0,   0    + 0.5},
+                        {0,   0.28 + 0.5},
+                        {-20,  0.7  + 0.5},
+                        {0,   1.1  + 0.5},
+                    };
+
+                    right_hand_sequence_animation.set_commands(
+                        right_hand_commands,
+                        sizeof(right_hand_commands) / sizeof(right_hand_commands[0]));
+                    right_hand_sequence_animation.start();
+
+                    static TimeAnimation::Command head_commands[] = {
+                        {0,   0    + 0.5},
+                        {0,   0.28 + 0.5},
+                        {-20,  0.7  + 0.5},
+                        {0,   1.1  + 0.5},
+                    };
+
+                    head_sequence_animation.set_commands(
+                        head_commands,
+                        sizeof(head_commands) / sizeof(head_commands[0]));
+                    head_sequence_animation.start();
+                }
             }
             // sound 4 - *
             if (joystick_state.row[3] & 0x8) {
@@ -679,41 +794,46 @@ void on_data_recv(const uint8_t *mac, const uint8_t *incoming_data, int len) {
                 myDFPlayer.start();
                 led_animation.set_params(500, 1000, 700);
                 led_animation.start();
+
+                if (!left_hand_sequence_animation.is_active()) {
+                    static TimeAnimation::Command left_hand_commands[] = {
+                        {0,   0     + 0.5},
+                        {0,   0.35  + 0.5},
+                        {20,  0.8   + 0.5},
+                        {0,   0.95  + 0.5},
+                    };
+
+                    left_hand_sequence_animation.set_commands(
+                        left_hand_commands,
+                        sizeof(left_hand_commands) / sizeof(left_hand_commands[0]));
+                    left_hand_sequence_animation.start();
+
+                    static TimeAnimation::Command right_hand_commands[] = {
+                        {0,   0    + 0.5},
+                        {0,   0.35 + 0.5},
+                        {-20, 0.8  + 0.5},
+                        {0,   0.95 + 0.5},
+                    };
+
+                    right_hand_sequence_animation.set_commands(
+                        right_hand_commands,
+                        sizeof(right_hand_commands) / sizeof(right_hand_commands[0]));
+                    right_hand_sequence_animation.start();
+
+                    static TimeAnimation::Command head_commands[] = {
+                        {0,   0    + 0.5},
+                        {0,   0.35 + 0.5},
+                        {-20, 0.8  + 0.5},
+                        {0,   0.95 + 0.5},
+                    };
+
+                    head_sequence_animation.set_commands(
+                        head_commands,
+                        sizeof(head_commands) / sizeof(head_commands[0]));
+                    head_sequence_animation.start();
+                }
+
             }
-
-            // //move body
-            // if (!shake_body_animation.is_active()) {
-            //     if (joystick_state.row[2] & 0x4) {
-            //         move_body_animation.start();
-            //         move_body_animation.set_speed(joystick_state.j_front_back);
-            //         wheel_active = false;
-            //     } else {
-            //         move_body_animation.stop();
-            //     }
-            // }
-            // //control wheels
-            // if (wheel_active && (joystick_state.j_front_back > 0.05 ||
-            //                      joystick_state.j_front_back < -0.05 ||
-            //                      joystick_state.j_left_right > 0.05 ||
-            //                      joystick_state.j_left_right < -0.05)) {
-
-            //     const float max_speed = 30.;
-            //     const float max_rotation = 15.;
-
-            //     float left_wheel_angle =
-            //         joystick_state.j_front_back * max_speed +
-            //         joystick_state.j_left_right * max_rotation + 90.;
-            //     left_wheel_servo.write(left_wheel_angle);
-
-            //     float right_wheel_angle =
-            //         -joystick_state.j_front_back * max_speed +
-            //         joystick_state.j_left_right * max_rotation + 90.;
-            //     right_wheel_servo.write(right_wheel_angle);
-            // } else {
-            //     left_wheel_servo.release();
-            //     right_wheel_servo.release();
-            // }
-
             // save previous state of buttons
             memcpy(&rows, joystick_state.row, sizeof(joystick_state.row));
         }
@@ -741,6 +861,9 @@ void loop() {
         head_position_animation.process(cur_time);
         neck_servo_sequence_no_animation.process(cur_time);
         body_servo_sequence_animation.process(cur_time);
+        left_hand_sequence_animation.process(cur_time);
+        right_hand_sequence_animation.process(cur_time);
+        head_sequence_animation.process(cur_time);
         delay(10);
     }
 }

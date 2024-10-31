@@ -139,9 +139,10 @@ class SequenceAnimation : public Animation {
      *
      * @param servo Reference to the servo motor controlled by this animation.
      */
-    SequenceAnimation(Servo &servo, const Command *commands = nullptr,
-                      int count = 0)
-        : servo_(servo) {
+    SequenceAnimation(
+            Servo &servo,
+            const Command *commands = nullptr,
+            int count = 0): servo_(servo) {
         set_commands(commands, count);
     }
 
@@ -213,4 +214,30 @@ class PositionControlAnimation : public Animation {
     void handle(unsigned long cur_time, unsigned long dt) override;
     void stop_handler() override;
 };
+
+
+class TimeAnimation : public Animation {
+ public:
+    struct Command {
+        float pos;
+        float time; //sec
+    };
+
+    TimeAnimation(Servo &servo): servo_(servo) {}
+
+    void set_commands(const Command *commands, int count);
+
+ protected:
+    void handle(unsigned long cur_time, unsigned long dt) override;
+    void stop_handler() override { paused_handler(); }
+    void start_handler() override;
+    void paused_handler() override;
+
+ private:
+    const Command *commands_ = nullptr;
+    int commands_count_ = 0;
+    int cur_command_index_ = 0;
+    Servo &servo_;
+};
+
 #endif

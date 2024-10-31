@@ -131,7 +131,9 @@ void LedAnimation::handle(unsigned long cur_time, unsigned long dt) {
         left_led.writeScaled(0);
         right_led.writeScaled(0);
     } else {
-        float value = (cos((cur_time - delay_ms) / (float)period_ms * PI * 2 + PI) + 1.) / 2.;
+        float value =
+            (cos((cur_time - delay_ms) / (float)period_ms * PI * 2 + PI) + 1.) /
+            2.;
         left_led.writeScaled(value);
         right_led.writeScaled(value);
     }
@@ -267,7 +269,8 @@ void SequenceAnimation::handle(unsigned long cur_time, unsigned long dt) {
 }
 
 void SequenceAnimation::update_controller_settings() {
-    if (cur_command_index_ < commands_count_ && commands_[cur_command_index_].is_move) {
+    if (cur_command_index_ < commands_count_ &&
+        commands_[cur_command_index_].is_move) {
         pos_controller_.reset();
         const Command &command = commands_[cur_command_index_];
         pos_controller_.set_max_speed(command.max_speed);
@@ -275,14 +278,46 @@ void SequenceAnimation::update_controller_settings() {
     }
 }
 
-
-void PositionControlAnimation::handle(unsigned long cur_time, unsigned long dt) {
+void PositionControlAnimation::handle(unsigned long cur_time,
+                                      unsigned long dt) {
     float dt_sec = dt / 1000.f;
     float speed = generator.evaluate(dt_sec, cur_pos);
     cur_pos += speed * dt_sec;
     servo_.write(cur_pos + zero_pos_);
 }
 
-void PositionControlAnimation::stop_handler() {
-    servo_.release();
+void PositionControlAnimation::stop_handler() { servo_.release(); }
+
+void TimeAnimation::set_commands(const Command *commands, int count) {
+    commands_ = commands;
+    commands_count_ = count;
+    cur_command_index_ = 1;
+}
+
+void TimeAnimation::start_handler() {
+    cur_command_index_ = 1;
+}
+
+void TimeAnimation::paused_handler() { servo_.release(); }
+
+void TimeAnimation::handle(unsigned long cur_time_, unsigned long dt) {
+    float cur_time = cur_time_ / 1000.f;
+    //process commands
+    while (cur_command_index_ < commands_count_) {
+        const Command &cur_command = commands_[cur_command_index_];
+        const Command &prev_command = commands_[cur_command_index_ - 1];
+        float scale = (cur_time - prev_command.time) / (cur_command.time - prev_command.time);
+
+        // process pos
+        if (scale < 1.f) {
+            float pos = (cur_command.pos - prev_command.pos) * scale + prev_command.pos;
+            servo_.write(pos + 90);
+            return;
+        // next command
+        } else {
+            cur_command_index_++; // Move to the next command
+        }
+    }
+
+    stop();
 }
